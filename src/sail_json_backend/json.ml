@@ -70,6 +70,7 @@ open Libsail
 open Ast
 open Ast_defs
 open Ast_util
+open Parse_ast.Attribute_data
 
 let debug_enabled =
   match Sys.getenv_opt "SAIL_DEBUG" with Some value -> value = "1" || int_of_string_opt value = Some 1 | None -> false
@@ -260,7 +261,13 @@ let parse_mapcl i mc =
   let format =
     match mc with
     | MCL_aux (_, (annot, _)) ->
-        String.concat "-" (List.map (fun attr -> match attr with _, "format", s -> s | _ -> "") annot.attrs)
+        String.concat "-" (
+            List.map (fun attr ->
+                match attr with
+                    (_, "format", Some (AD_aux( AD_string(s), _ ))) -> s
+                    | _ -> ""
+                )
+            annot.attrs)
   in
   begin
     match string_of_id i with
@@ -283,7 +290,7 @@ let parse_mapcl i mc =
             List.iter
               (fun mnemonic ->
                 List.iter
-                  (fun attr -> match attr with _, "name", name -> Hashtbl.add names mnemonic name | _ -> ())
+                  (fun attr -> match attr with (_, "name", Some (AD_aux( AD_string(name), _))) -> Hashtbl.add names mnemonic name | _ -> ())
                   annot.attrs
               )
               sl
@@ -309,7 +316,7 @@ let parse_type_union i ucl =
             let l = List.map string_of_typ x in
             Hashtbl.add sigs (string_of_id d) l;
             List.iter
-              (fun attr -> match attr with _, "name", s -> Hashtbl.add names (string_of_id d) s | _ -> ())
+              (fun attr -> match attr with (_, "name", Some (AD_aux( AD_string(s), _))) -> Hashtbl.add names (string_of_id d) s | _ -> ())
               annot.attrs;
             begin
               match annot.doc_comment with None -> () | Some s -> Hashtbl.add descriptions (string_of_id d) s
