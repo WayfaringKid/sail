@@ -159,15 +159,20 @@ let rec string_list_of_mpat x =
       debug_print "MP_tuple";
       List.concat (List.map string_list_of_mpat mpl)
   | MP_aux (MP_vector _, _) ->
-      debug_print "unsupported MP_vector"; [ "unsupported MP_vector" ]
+      debug_print "unsupported MP_vector";
+      ["unsupported MP_vector"]
   | MP_aux (MP_list _, _) ->
-      debug_print "unsupported MP_list"; [ "unsupported MP_list" ]
+      debug_print "unsupported MP_list";
+      ["unsupported MP_list"]
   | MP_aux (MP_cons _, _) ->
-      debug_print "unsupported MP_cons"; [ "unsupported MP_cons" ]
+      debug_print "unsupported MP_cons";
+      ["unsupported MP_cons"]
   | MP_aux (MP_as _, _) ->
-      debug_print "unsupported MP_as"; [ "unsupported MP_as" ]
+      debug_print "unsupported MP_as";
+      ["unsupported MP_as"]
   | MP_aux (MP_struct _, _) ->
-      debug_print "unsupported MP_struct"; [ "unsupported MP_struct" ]
+      debug_print "unsupported MP_struct";
+      ["unsupported MP_struct"]
   | _ -> assert false
 
 let parse_encdec_mpat mp pb format =
@@ -271,13 +276,11 @@ let parse_mapcl i mc =
   let format =
     match mc with
     | MCL_aux (_, (annot, _)) ->
-        String.concat "-" (
-            List.map (fun attr ->
-                match attr with
-                    (_, "format", Some (AD_aux( AD_string(s), _ ))) -> s
-                    | _ -> ""
-                )
-            annot.attrs)
+        String.concat "-"
+          (List.map
+             (fun attr -> match attr with _, "format", Some (AD_aux (AD_string s, _)) -> s | _ -> "")
+             annot.attrs
+          )
   in
   begin
     match string_of_id i with
@@ -300,7 +303,11 @@ let parse_mapcl i mc =
             List.iter
               (fun mnemonic ->
                 List.iter
-                  (fun attr -> match attr with (_, "name", Some (AD_aux( AD_string(name), _))) -> Hashtbl.add names mnemonic name | _ -> ())
+                  (fun attr ->
+                    match attr with
+                    | _, "name", Some (AD_aux (AD_string name, _)) -> Hashtbl.add names mnemonic name
+                    | _ -> ()
+                  )
                   annot.attrs
               )
               sl
@@ -326,7 +333,11 @@ let parse_type_union i ucl =
             let l = List.map string_of_typ x in
             Hashtbl.add sigs (string_of_id d) l;
             List.iter
-              (fun attr -> match attr with (_, "name", Some (AD_aux( AD_string(s), _))) -> Hashtbl.add names (string_of_id d) s | _ -> ())
+              (fun attr ->
+                match attr with
+                | _, "name", Some (AD_aux (AD_string s, _)) -> Hashtbl.add names (string_of_id d) s
+                | _ -> ()
+              )
               annot.attrs;
             begin
               match annot.doc_comment with None -> () | Some s -> Hashtbl.add descriptions (string_of_id d) s
