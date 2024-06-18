@@ -158,6 +158,16 @@ let rec string_list_of_mpat x =
   | MP_aux (MP_tuple mpl, _) ->
       debug_print "MP_tuple";
       List.concat (List.map string_list_of_mpat mpl)
+  | MP_aux (MP_vector _, _) ->
+      debug_print "unsupported MP_vector"; [ "unsupported MP_vector" ]
+  | MP_aux (MP_list _, _) ->
+      debug_print "unsupported MP_list"; [ "unsupported MP_list" ]
+  | MP_aux (MP_cons _, _) ->
+      debug_print "unsupported MP_cons"; [ "unsupported MP_cons" ]
+  | MP_aux (MP_as _, _) ->
+      debug_print "unsupported MP_as"; [ "unsupported MP_as" ]
+  | MP_aux (MP_struct _, _) ->
+      debug_print "unsupported MP_struct"; [ "unsupported MP_struct" ]
   | _ -> assert false
 
 let parse_encdec_mpat mp pb format =
@@ -398,15 +408,22 @@ let identity_funcs =
     "hex_bits_4";
     "hex_bits_5";
     "hex_bits_6";
+    "hex_bits_signed_6";
     "hex_bits_7";
     "hex_bits_8";
+    "hex_bits_signed_8";
     "hex_bits_10";
     "hex_bits_11";
+    "hex_bits_signed_11";
     "hex_bits_12";
+    "hex_bits_signed_12";
     "hex_bits_13";
+    "hex_bits_signed_13";
     "hex_bits_16";
     "hex_bits_20";
+    "hex_bits_signed_20";
     "hex_bits_21";
+    "hex_bits_signed_21";
     "hex_bits_32";
     "reg_name";
     "creg_name";
