@@ -198,8 +198,6 @@ let parse_encdec_mpat mp pb format =
       end;
       string_of_id app_id
   | _ -> assert false
-  
-  
 
 (* This looks for any "extension(string)", and does not, for example
    account for negation. This case should be pretty unlikely, however. *)
@@ -318,37 +316,33 @@ let parse_assembly i mc =
       end
   | _ -> assert false
 
+let handle_fmtencdec_mapping mc =
+  debug_print "handle_fmtencdec_mapping called";
+  match mc with
+  | MCL_aux (MCL_bidir (lhs_mpexp, rhs_mpexp), _) ->
+      begin
+        let lhs_pat = match lhs_mpexp with
+          | MPat_aux (MPat_pat pat, _) -> pat
+          | MPat_aux (MPat_when (pat, _), _) -> pat
+        in
+        let rhs_pat = match rhs_mpexp with
+          | MPat_aux (MPat_pat pat, _) -> pat
+          | MPat_aux (MPat_when (pat, _), _) -> pat
+        in
+        match lhs_pat, rhs_pat with
+        | MP_aux (MP_app (type_id, _), _), MP_aux (MP_app (format_id, _), _) ->
+            let instruction_type = string_of_id type_id in
+            let format = string_of_id format_id in
+            debug_print ("Instruction type: " ^ instruction_type ^ ", format: " ^ format);
+            Hashtbl.add instruction_type_to_format instruction_type format;
+        | _ -> ()
+      end
+  | _ -> debug_print "Not an fmtencdec mapping"
+
 let parse_mapcl i mc =
   debug_print ("parse_mapcl " ^ string_of_id i);
 
-  let handle_fmtencdec_mapping mc =
-    debug_print "handle_fmtencdec_mapping called";
-    match mc with
-    | MCL_aux (MCL_bidir (lhs_mpexp, rhs_mpexp), _) ->
-        begin
-          let lhs_pat = match lhs_mpexp with
-            | MPat_aux (MPat_pat pat, _) -> pat
-            | MPat_aux (MPat_when (pat, _), _) -> pat
-          in
-          let rhs_pat = match rhs_mpexp with
-            | MPat_aux (MPat_pat pat, _) -> pat
-            | MPat_aux (MPat_when (pat, _), _) -> pat
-          in
-          match lhs_pat, rhs_pat with
-          | MP_aux (MP_app (type_id, _), _), MP_aux (MP_app (format_id, _), _) ->
-              let instruction_type = string_of_id type_id in
-              let format = string_of_id format_id in
-              debug_print ("Instruction type: " ^ instruction_type ^ ", format: " ^ format);
-              Hashtbl.add instruction_type_to_format instruction_type format;
-          | _ -> debug_print "Unhandled pattern in fmtencdec mapping"
-        end
-    | _ -> debug_print "Not an fmtencdec mapping"
-  in
-
   match string_of_id i with
-  | "fmtencdec" ->
-      debug_print ("Handling fmtencdec for " ^ string_of_id i);
-      handle_fmtencdec_mapping mc;
   | "encdec" | "encdec_compressed" ->
       debug_print ("Handling encdec for " ^ string_of_id i);
       let format = "" in
@@ -448,65 +442,21 @@ let extract_source_code l =
   | Some (p1, p2) -> Reporting.loc_range_to_src p1 p2
   | None -> "Error - couldn't locate func"
 
-(* parse_funcl did not help in mapping formats. It was done in parse_mapcl.
-   However, debug statement might be useful for future works.
-*)
 let parse_funcl fcl =
   match fcl with
   | FCL_aux (FCL_funcl (Id_aux (Id id, _), Pat_aux (pat, _)), _) -> begin
       match pat with
       | Pat_exp (P_aux (P_tuple pl, _), e) | Pat_when (P_aux (P_tuple pl, _), e, _) ->
-          debug_print ("parse_funcl id_of_dependent: " ^ id);
+          debug_print ("id_of_dependent: " ^ id);
           let source_code = extract_source_code (Ast_util.exp_loc e) in
           Hashtbl.add functions id source_code
       | Pat_exp (P_aux (P_app (i, pl), _), e) | Pat_when (P_aux (P_app (i, pl), _), e, _) ->
-          debug_print ("parse_funcl FCL_funcl execute " ^ id);
+          debug_print ("FCL_funcl execute " ^ string_of_id i);
           let source_code = extract_source_code (Ast_util.exp_loc e) in
-          ()
-      | Pat_exp (P_aux (P_lit my_literal, _), e) | Pat_when (P_aux (P_lit my_literal, _), e, _) ->
-        (* This mapping is kinda unnecessary, depend on future tasks *)
-        if id = "opcode2format" then
-          debug_print ("parse_funcl Mapped opcode " ^ opcode ^ " to format " ^ format);
-        else
-          debug_print ("parse_funcl " ^ id ^ ": " ^ string_of_lit my_literal ^ "exp: " ^ string_of_exp e);
-      | Pat_exp (P_aux (P_wild, _), e) | Pat_when (P_aux (P_wild, _), e, _) ->
-          debug_print ("parse_funcl Wildcard pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_typ (typ, p), _), e) | Pat_when (P_aux (P_typ (typ, p), _), e, _) ->
-          debug_print ("parse_funcl Typed pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_id ident, _), e) | Pat_when (P_aux (P_id ident, _), e, _) ->
-          debug_print ("parse_funcl Identifier pattern: " ^ string_of_id ident);
-          ()
-      | Pat_exp (P_aux (P_var (p, typ), _), e) | Pat_when (P_aux (P_var (p, typ), _), e, _) ->
-          debug_print ("parse_funcl Pattern variable in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_vector pl, _), e) | Pat_when (P_aux (P_vector pl, _), e, _) ->
-          debug_print ("parse_funcl Vector pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_vector_concat pl, _), e) | Pat_when (P_aux (P_vector_concat pl, _), e, _) ->
-          debug_print ("parse_funcl Concatenated vector pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_vector_subrange (ident, start_idx, end_idx), _), e)
-      | Pat_when (P_aux (P_vector_subrange (ident, start_idx, end_idx), _), e, _) ->
-          debug_print ("parse_funcl Vector subrange pattern in " ^ id ^ " from " ^ Z.to_string start_idx ^ " to " ^ Z.to_string end_idx);
-          ()
-      | Pat_exp (P_aux (P_list pl, _), e) | Pat_when (P_aux (P_list pl, _), e, _) ->
-          debug_print ("parse_funcl List pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_cons (p1, p2), _), e) | Pat_when (P_aux (P_cons (p1, p2), _), e, _) ->
-          debug_print ("parse_funcl Cons pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_string_append pl, _), e) | Pat_when (P_aux (P_string_append pl, _), e, _) ->
-          debug_print ("parse_funcl String append pattern in " ^ id);
-          ()
-      | Pat_exp (P_aux (P_struct (fl, typ), _), e) | Pat_when (P_aux (P_struct (fl, typ), _), e, _) ->
-          debug_print ("parse_funcl Struct pattern in " ^ id);
-          ()
-      | _ -> debug_print ("Other pattern in " ^ id)
+          Hashtbl.add executes (string_of_id i) source_code
+      | _ -> ()
     end
   | _ -> debug_print "FCL_funcl other"
-
 
 let json_of_key_operand key op t = "\n{\n" ^ "  \"name\": \"" ^ op ^ "\", \"type\": \"" ^ t ^ "\"\n" ^ "}"
 
@@ -748,9 +698,7 @@ let json_of_description k =
   let description = match Hashtbl.find_opt descriptions k with None -> "TBD" | Some f -> String.escaped f in
   "\"" ^ description ^ "\""
 
-
 let json_of_format k =
-  (* Debug message to print the value of k *)
   debug_print ("K is " ^ k);
   
   let format =
@@ -774,7 +722,6 @@ let json_of_instruction k v =
   ^ "  \"format\": " ^ json_of_format k ^ ",\n" ^ "  \"fields\": [ " ^ json_of_fields k ^ " ],\n"
   ^ "  \"extensions\": [ " ^ json_of_extensions k ^ " ],\n" ^ "  \"function\": " ^ json_of_function k ^ ",\n"
   ^ "  \"description\": " ^ json_of_description k ^ "\n" ^ "}"
-  
 
 let rec parse_typ name t =
   match t with
@@ -828,7 +775,6 @@ let rec explode_mnemonics asm =
     end
     else explode_mnemonic [([""], [List.hd asm])] tails
   )
-
 
 let defs { defs; _ } =
   List.iter
