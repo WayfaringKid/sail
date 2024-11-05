@@ -341,14 +341,24 @@ let handle_fmtencdec_mapping mc =
 
 let parse_mapcl i mc =
   debug_print ("parse_mapcl " ^ string_of_id i);
-
+  let format =
+    match mc with
+    | MCL_aux (_, (annot, _)) ->
+        String.concat "-"
+          (List.map
+              (fun attr -> match attr with _, "format", Some (AD_aux (AD_string s, _)) -> s | _ -> "")
+              annot.attrs
+          )
+  in
   match string_of_id i with
+  | "fmtencdec" ->
+    debug_print (string_of_id i);
+    handle_fmtencdec_mapping mc;
   | "encdec" | "encdec_compressed" ->
-      debug_print ("Handling encdec for " ^ string_of_id i);
-      let format = "" in
+      debug_print (string_of_id i);
       parse_encdec i mc format;
   | "assembly" ->
-      debug_print ("Handling assembly for " ^ string_of_id i);
+      debug_print (string_of_id i);
       parse_assembly i mc;
   | _ -> begin
       match mc with
@@ -699,8 +709,6 @@ let json_of_description k =
   "\"" ^ description ^ "\""
 
 let json_of_format k =
-  debug_print ("K is " ^ k);
-  
   let format =
     match Hashtbl.find_opt instruction_type_to_format k with
     | None -> "TBD"
