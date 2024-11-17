@@ -92,6 +92,7 @@ let extensions = Hashtbl.create 997
 let mappings = Hashtbl.create 997
 let registers = Hashtbl.create 997
 let instruction_type_to_format = Hashtbl.create 997
+let pattern_to_mnemonic = Hashtbl.create 997
 
 let debug_print ?(printer = prerr_endline) message = if debug_enabled then printer message else ()
 
@@ -177,30 +178,9 @@ let rec string_list_of_mpat x =
       ["unsupported MP_struct"]
   | _ -> assert false
 
-let parse_encdec_mpat mp pb format =
-  match mp with
-  | MP_aux (MP_app (app_id, mpl), _) ->
-      debug_print ("MP_app " ^ string_of_id app_id);
-      Hashtbl.add formats (string_of_id app_id) format;
-      let operandl = List.concat (List.map string_list_of_mpat mpl) in
-      begin
-        List.iter debug_print operandl;
-        debug_print "MCL_bidir (right part)";
-        match pb with
-        | MPat_aux (MPat_pat p, _) ->
-            debug_print "MPat_pat ";
-            List.iter debug_print (string_list_of_mpat p);
-            Hashtbl.add encodings (string_of_id app_id) (string_list_of_mpat p)
-        | MPat_aux (MPat_when (p, e), _) ->
-            debug_print "MPat_when ";
-            List.iter debug_print (string_list_of_mpat p);
-            Hashtbl.add encodings (string_of_id app_id) (string_list_of_mpat p)
-      end;
-      string_of_id app_id
-  | _ -> assert false
 
 (* This looks for any "extension(string)", and does not, for example
-   account for negation. This case should be pretty unlikely, however. *)
+account for negation. This case should be pretty unlikely, however. *)
 let rec find_extensions e =
   match e with
   | E_aux (E_app (i, el), _) ->
@@ -213,6 +193,48 @@ let rec find_extensions e =
       debug_print "E other";
       []
 
+let parse_encdec_mpat mp pb format =
+  match mp with
+  | MP_aux (MP_app (app_id, mpl), _) ->
+      let constructor = string_of_id app_id in
+      let operands = List.concat (List.map string_list_of_mpat mpl) in
+      let instruction_pattern = (constructor, operands) in
+
+      (* Try to get mnemonic *)
+      let mnemonic =
+        match Hashtbl.find_opt pattern_to_mnemonic instruction_pattern with
+        | Some mn -> mn
+        | None ->
+            if String.ends_with ~suffix:"_mnemonic" constructor then
+              (* If constructor ends with '_mnemonic', use the operand *)
+              if List.length operands = 1 then List.hd operands else constructor
+            else
+              constructor
+      in  (* Missing 'in' added here *)
+
+      (* Use mnemonic as key *)
+      let key = mnemonic in
+
+      (* Store instruction format *)
+      Hashtbl.add formats key format;
+
+      (* Store operands *)
+      Hashtbl.add inputs key operands;
+
+      (* Store encoding *)
+      (match pb with
+      | MPat_aux (MPat_pat p, _) ->
+          let encoding = string_list_of_mpat p in
+          Hashtbl.add encodings key encoding
+      | MPat_aux (MPat_when (p, e), _) ->
+          let encoding = string_list_of_mpat p in
+          Hashtbl.add encodings key encoding;
+          let ext = find_extensions e in
+          Hashtbl.add extensions key ext
+      );
+      key
+  | _ -> assert false
+      
 let parse_encdec i mc format =
   match mc with
   | MCL_aux (MCL_bidir (pa, pb), _) ->
@@ -232,7 +254,7 @@ let parse_encdec i mc format =
             end
       end
   | _ -> assert false
-
+      
 let rec filter_non_operands components =
   match components with
   | [] -> []
@@ -255,7 +277,8 @@ let rec extract_operands k filtered_components =
       )
       else extract_operands k tl
 
-let extract_and_map_operands k components =
+(* let extract_and_map_operands k components =
+  debug_print ("testing");
   let filtered_components = filter_non_operands components in
   let operandl = extract_operands k filtered_components in
   let opmap = List.combine (Hashtbl.find inputs k) (Hashtbl.find sigs k) in
@@ -272,7 +295,38 @@ let extract_and_map_operands k components =
     ("Adding to operands hashtable: " ^ k ^ " -> "
     ^ String.concat ", " (List.map (fun (op, t) -> Printf.sprintf "(%s, %s)" op t) operand_with_type)
     );
-  Hashtbl.add operands k operand_with_type
+  Hashtbl.add operands k operand_with_type *)
+
+let extract_and_map_operands mnemonic asm_syntax =
+  (* Filter out non-operand components from the assembly syntax *)
+  let filtered_components = filter_non_operands asm_syntax in
+
+  (* Extract operands from the filtered assembly syntax *)
+  let operand_list = extract_operands mnemonic filtered_components in
+
+  (* Retrieve operand types from the 'sigs' hash table *)
+  let operand_types =
+    match Hashtbl.find_opt sigs mnemonic with
+    | Some types -> types
+    | None ->
+        debug_print ("No operand types found for mnemonic: " ^ mnemonic);
+        (* Assign empty strings as types if none are found *)
+        List.map (fun _ -> "") operand_list
+  in
+
+  (* Pair operands with their types *)
+  let operand_with_type =
+    try List.combine operand_list operand_types
+    with Invalid_argument _ ->
+      debug_print ("Mismatch in operands and types for mnemonic: " ^ mnemonic);
+      (* Assign empty types if lengths mismatch *)
+      List.map (fun op -> (op, "")) operand_list
+  in
+
+  (* Store the operands and their types using the mnemonic as key *)
+  Hashtbl.add operands mnemonic operand_with_type
+  
+  
 
 let add_assembly app_id p =
   let x = string_list_of_mpat p in
@@ -285,21 +339,44 @@ let add_assembly app_id p =
 let parse_assembly_mpat mp pb =
   match mp with
   | MP_aux (MP_app (app_id, mpl), _) ->
-      debug_print ("MP_app " ^ string_of_id app_id);
-      let inputl = List.concat (List.map string_list_of_mpat mpl) in
-      Hashtbl.add inputs (string_of_id app_id) inputl;
-      begin
-        List.iter debug_print inputl;
-        debug_print "MCL_bidir (right part)";
+      let constructor = string_of_id app_id in
+      let operands = List.concat (List.map string_list_of_mpat mpl) in
+      let instruction_pattern = (constructor, operands) in
+
+      (* Extract mnemonic from pb *)
+      let mnemonic =
         match pb with
         | MPat_aux (MPat_pat p, _) ->
-            debug_print "MPat_pat assembly";
-            add_assembly app_id p
-        | MPat_aux (MPat_when (p, e), _) ->
-            debug_print "MPat_when assembly";
-            add_assembly app_id p
-      end
-  | _ -> assert false
+            (match string_list_of_mpat p with
+            | mn :: _ -> mn
+            | [] -> "unknown")
+        | MPat_aux (MPat_when (p, _), _) ->
+            (match string_list_of_mpat p with
+            | mn :: _ -> mn
+            | [] -> "unknown")
+      in
+
+      (* Store mapping from instruction pattern to mnemonic *)
+      Hashtbl.add pattern_to_mnemonic instruction_pattern mnemonic;
+
+      (* Use mnemonic as key *)
+      let key = mnemonic in
+
+      (* Store operands *)
+      Hashtbl.add inputs key operands;
+
+      (* Process assembly syntax *)
+      (match pb with
+      | MPat_aux (MPat_pat p, _) ->
+          let asm_syntax = string_list_of_mpat p in
+          Hashtbl.add assembly key asm_syntax;
+          extract_and_map_operands key asm_syntax
+      | MPat_aux (MPat_when (p, _), _) ->
+          let asm_syntax = string_list_of_mpat p in
+          Hashtbl.add assembly key asm_syntax;
+          extract_and_map_operands key asm_syntax
+      )
+  | _ -> assert false  
 
 let parse_assembly i mc =
   match mc with
@@ -352,23 +429,23 @@ let parse_mapcl i mc =
   in
   match string_of_id i with
   | "fmtencdec" ->
-    debug_print (string_of_id i);
-    handle_fmtencdec_mapping mc;
-  | "encdec" | "encdec_compressed" ->
       debug_print (string_of_id i);
-      parse_encdec i mc format;
+      handle_fmtencdec_mapping mc;
   | "assembly" ->
       debug_print (string_of_id i);
       parse_assembly i mc;
+  | "encdec" | "encdec_compressed" ->
+      debug_print (string_of_id i);
+      parse_encdec i mc format;
   | _ -> begin
+      (* Handle other mappings if necessary *)
       match mc with
       | MCL_aux (MCL_bidir (MPat_aux (MPat_pat mpl, _), MPat_aux (MPat_pat mpr, _)), (annot, _)) ->
           debug_print ("MCL_bidir " ^ string_of_id i);
           let sl_left = string_list_of_mpat mpl in
           let sl_right = string_list_of_mpat mpr in
-          List.iter (fun s -> debug_print ("L: " ^ s)) sl_left;
-          List.iter (fun s -> debug_print ("R: " ^ s)) sl_right;
           Hashtbl.add mappings (string_of_id i) (sl_left, sl_right);
+          (* Store names *)
           List.iter
             (fun mnemonic ->
               List.iter
@@ -382,7 +459,8 @@ let parse_mapcl i mc =
             sl_right
       | _ -> debug_print "MCL other"
     end
-;;
+  
+  
 
 let parse_type_union i ucl =
   debug_print ("type_union " ^ string_of_id i);
@@ -454,19 +532,34 @@ let extract_source_code l =
 
 let parse_funcl fcl =
   match fcl with
-  | FCL_aux (FCL_funcl (Id_aux (Id id, _), Pat_aux (pat, _)), _) -> begin
-      match pat with
-      | Pat_exp (P_aux (P_tuple pl, _), e) | Pat_when (P_aux (P_tuple pl, _), e, _) ->
-          debug_print ("id_of_dependent: " ^ id);
-          let source_code = extract_source_code (Ast_util.exp_loc e) in
-          Hashtbl.add functions id source_code
-      | Pat_exp (P_aux (P_app (i, pl), _), e) | Pat_when (P_aux (P_app (i, pl), _), e, _) ->
-          debug_print ("FCL_funcl execute " ^ string_of_id i);
-          let source_code = extract_source_code (Ast_util.exp_loc e) in
-          Hashtbl.add executes (string_of_id i) source_code
-      | _ -> ()
-    end
+  | FCL_aux (FCL_funcl (Id_aux (Id id, _), Pat_aux (pat, _)), _) ->
+      (* Extract mnemonic *)
+      let mnemonic =
+        match pat with
+        | Pat_exp (P_aux (P_app (mn_id, _), _), _) ->
+            string_of_id mn_id
+        | Pat_when (P_aux (P_app (mn_id, _), _), _, _) ->
+            string_of_id mn_id
+        | Pat_exp (P_aux (P_id mn_id, _), _) ->
+            string_of_id mn_id
+        | Pat_when (P_aux (P_id mn_id, _), _, _) ->
+            string_of_id mn_id
+        | _ -> id
+      in
+      (* Extract function body code *)
+      let source_code =
+        match pat with
+        | Pat_exp (_, e) | Pat_when (_, e, _) ->
+            extract_source_code (Ast_util.exp_loc e)
+        | _ -> ""
+      in
+      (* Use mnemonic as key to store function code *)
+      Hashtbl.add functions mnemonic source_code
   | _ -> debug_print "FCL_funcl other"
+  
+  
+  
+  
 
 let json_of_key_operand key op t = "\n{\n" ^ "  \"name\": \"" ^ op ^ "\", \"type\": \"" ^ t ^ "\"\n" ^ "}"
 
@@ -687,22 +780,32 @@ let rec string_of_sizeof_field k f =
 
 let json_of_field k f = "{ \"field\": \"" ^ f ^ "\", \"size\": " ^ string_of_sizeof_field k f ^ " }"
 
-let json_of_fields k =
-  match Hashtbl.find_opt encodings k with
+let json_of_fields mnemonic =
+  match Hashtbl.find_opt encodings mnemonic with
   | None -> ""
-  | Some fields -> String.concat ", " (List.map (fun f -> json_of_field k f) fields)
+  | Some fields -> String.concat ", " (List.map (fun f -> json_of_field mnemonic f) fields)
 
-let json_of_function k =
-  let fspec = match Hashtbl.find_opt executes k with None -> "" | Some f -> String.escaped f in
-  "\"" ^ fspec ^ "\""
 
-let json_of_name k mnemonic =
+let json_of_function mnemonic =
+  match Hashtbl.find_opt functions mnemonic with
+  | Some f -> "\"" ^ String.escaped f ^ "\""
+  | None -> "\"\""  
+
+
+(* let json_of_name k mnemonic =
   let name =
     match Hashtbl.find_opt names k with
     | None -> begin match Hashtbl.find_opt names mnemonic with None -> "TBD" | Some s -> String.escaped s end
     | Some s -> String.escaped s
   in
-  "\"" ^ name ^ "\""
+  "\"" ^ name ^ "\"" *)
+let json_of_name mnemonic =
+  let name =
+    match Hashtbl.find_opt names mnemonic with
+    | None -> "TBD"
+    | Some s -> String.escaped s
+  in
+  "\"" ^ name ^ "\""  
 
 let json_of_description k =
   let description = match Hashtbl.find_opt descriptions k with None -> "TBD" | Some f -> String.escaped f in
@@ -720,7 +823,7 @@ let json_of_format k =
   
 
 let json_of_extensions k = match Hashtbl.find_opt extensions k with None -> "" | Some l -> String.concat "," l
-
+(* 
 let json_of_instruction k v =
   "{\n" ^ "  \"mnemonic\": "
   ^ json_of_mnemonic (List.hd v)
@@ -729,7 +832,21 @@ let json_of_instruction k v =
   ^ ",\n" ^ "  \"operands\": [ " ^ json_of_operands k ^ " ],\n" ^ "  \"syntax\": " ^ "\"" ^ json_of_syntax k ^ "\",\n"
   ^ "  \"format\": " ^ json_of_format k ^ ",\n" ^ "  \"fields\": [ " ^ json_of_fields k ^ " ],\n"
   ^ "  \"extensions\": [ " ^ json_of_extensions k ^ " ],\n" ^ "  \"function\": " ^ json_of_function k ^ ",\n"
-  ^ "  \"description\": " ^ json_of_description k ^ "\n" ^ "}"
+  ^ "  \"description\": " ^ json_of_description k ^ "\n" ^ "}" *)
+
+let json_of_instruction mnemonic =
+  "{\n" ^
+  "  \"mnemonic\": " ^ "\"" ^ mnemonic ^ "\",\n" ^
+  "  \"name\": " ^ json_of_name mnemonic ^ ",\n" ^
+  "  \"operands\": [ " ^ json_of_operands mnemonic ^ " ],\n" ^
+  "  \"syntax\": " ^ "\"" ^ json_of_syntax mnemonic ^ "\",\n" ^
+  "  \"format\": " ^ json_of_format mnemonic ^ ",\n" ^
+  "  \"fields\": [ " ^ json_of_fields mnemonic ^ " ],\n" ^
+  "  \"extensions\": [ " ^ json_of_extensions mnemonic ^ " ],\n" ^
+  "  \"function\": " ^ json_of_function mnemonic ^ ",\n" ^
+  "  \"description\": " ^ json_of_description mnemonic ^ "\n" ^
+  "}"
+  
 
 let rec parse_typ name t =
   match t with
@@ -785,28 +902,59 @@ let rec explode_mnemonics asm =
   )
 
 let defs { defs; _ } =
+  (* Initialize mapping lists *)
+  let assembly_mappings = ref [] in
+  let encdec_mappings = ref [] in
+  let other_mappings = ref [] in
+
+  (* Iterate over all definitions *)
   List.iter
     (fun def ->
       match def with
-      | DEF_aux (DEF_type def, _) -> parse_DEF_type def
+      | DEF_aux (DEF_type def, _) ->
+          parse_DEF_type def
+
       | DEF_aux (DEF_val (VS_aux (VS_val_spec (TypSchm_aux (TypSchm_ts (_, t), _), i, _), _)), _) ->
           parse_typ (string_of_id i) t
+
       | DEF_aux (DEF_fundef (FD_aux (FD_function (_, _, fl), _)), _) ->
           debug_print "DEF_fundef";
           List.iter parse_funcl fl
+
       | DEF_aux (DEF_mapdef (MD_aux (MD_mapping (i, _, ml), _)), _) ->
           debug_print "DEF_mapdef";
-          List.iter (parse_mapcl i) ml
+          let mapping_name = string_of_id i in
+          if mapping_name = "assembly" then
+            assembly_mappings := (i, ml) :: !assembly_mappings
+          else if mapping_name = "encdec" || mapping_name = "encdec_compressed" then
+            encdec_mappings := (i, ml) :: !encdec_mappings
+          else
+            other_mappings := (i, ml) :: !other_mappings
+
       | DEF_aux (DEF_register (DEC_aux (DEC_reg (atyp, id, _), _)), _) ->
           let reg_name = string_of_id id in
           let reg_type = string_of_typ atyp in
           Hashtbl.add registers reg_name reg_type
+
       | _ -> debug_print ~printer:prerr_string ""
     )
     defs;
 
+  (* Process assembly mappings first *)
+  List.iter (fun (i, ml) -> List.iter (parse_mapcl i) ml) (List.rev !assembly_mappings);
+
+  (* Process other mappings *)
+  List.iter (fun (i, ml) -> List.iter (parse_mapcl i) ml) (List.rev !other_mappings);
+
+  (* Process encdec mappings last *)
+  List.iter (fun (i, ml) -> List.iter (parse_mapcl i) ml) (List.rev !encdec_mappings);
+
+  (* Rest of your code to process the collected data and generate JSON output *)
   debug_print "TYPES";
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) types;
+
+  (* ... rest of your code ... *)
+  
   debug_print "SIGS";
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) sigs;
   debug_print "NAMES";
@@ -818,7 +966,10 @@ let defs { defs; _ } =
     (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun (op, t) -> "(" ^ op ^ ", " ^ t ^ ")") v))
     operands;
   debug_print "ENCODINGS";
-  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) encodings;
+  (* Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) encodings; *)
+  Hashtbl.iter
+  (fun k v -> debug_print ("Encoding key: " ^ k ^ ", value: " ^ String.concat ", " v))
+  encodings;
   debug_print "ASSEMBLY";
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) assembly;
   debug_print "EXECUTES";
@@ -850,7 +1001,7 @@ let defs { defs; _ } =
 
   print_endline "{";
   print_endline "  \"instructions\": [";
-
+(* 
   (* Join keys and mnemonics, then sort by mnemonic, then use the keys in that order to emit instructions *)
   let key_mnemonic_sorted =
     let key_mnemonic_map = Hashtbl.fold (fun k v init -> [k; List.hd v] :: init) assembly_clean [] in
@@ -858,6 +1009,14 @@ let defs { defs; _ } =
   in
   print_endline
     (String.concat ",\n" (List.map (fun a -> json_of_instruction (List.hd a) (List.tl a)) key_mnemonic_sorted));
+
+  print_endline "  ],"; *)
+  (* 获取所有的助记符列表 *)
+  let mnemonics = Hashtbl.fold (fun k _ acc -> k :: acc) assembly_clean [] in
+  let sorted_mnemonics = List.sort String.compare mnemonics in
+
+  print_endline
+    (String.concat ",\n" (List.map (fun mnemonic -> json_of_instruction mnemonic) sorted_mnemonics));
 
   print_endline "  ],";
   print_endline "  \"registers\": ";
@@ -894,3 +1053,136 @@ let defs { defs; _ } =
     );
   print_endline "  ]";
   print_endline "}"
+
+(* let assembly_mappings = ref []
+let encdec_mappings = ref []
+let other_mappings = ref []
+  
+let defs { defs; _ } =
+
+  List.iter
+    (fun def ->
+      match def with
+      | DEF_aux (DEF_type def, _) -> parse_DEF_type def
+      | DEF_aux (DEF_val (VS_aux (VS_val_spec (TypSchm_aux (TypSchm_ts (_, t), _), i, _), _)), _) ->
+          parse_typ (string_of_id i) t
+      | DEF_aux (DEF_fundef (FD_aux (FD_function (_, _, fl), _)), _) ->
+          debug_print "DEF_fundef";
+          List.iter parse_funcl fl
+      | DEF_aux (DEF_mapdef (MD_aux (MD_mapping (i, _, ml), _)), _) ->
+        debug_print "DEF_mapdef";
+        let mapping_name = string_of_id i in
+        if mapping_name = "assembly" then
+          assembly_mappings := (i, ml) :: !assembly_mappings
+        else if mapping_name = "encdec" || mapping_name = "encdec_compressed" then
+          encdec_mappings := (i, ml) :: !encdec_mappings
+        else
+          other_mappings := (i, ml) :: !other_mappings
+      | DEF_aux (DEF_register (DEC_aux (DEC_reg (atyp, id, _), _)), _) ->
+          let reg_name = string_of_id id in
+          let reg_type = string_of_typ atyp in
+          Hashtbl.add registers reg_name reg_type
+      | _ -> debug_print ~printer:prerr_string ""
+    )
+    defs;
+
+  debug_print "TYPES";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) types;
+  debug_print "SIGS";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) sigs;
+  debug_print "NAMES";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) names;
+  debug_print "DESCRIPTIONS";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) descriptions;
+  debug_print "OPERANDS";
+  Hashtbl.iter
+    (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun (op, t) -> "(" ^ op ^ ", " ^ t ^ ")") v))
+    operands;
+  debug_print "ENCODINGS";
+  (* Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) encodings; *)
+  Hashtbl.iter
+  (fun k v -> debug_print ("Encoding key: " ^ k ^ ", value: " ^ String.concat ", " v))
+  encodings;
+  debug_print "ASSEMBLY";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) assembly;
+  debug_print "EXECUTES";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) executes;
+  debug_print "FUNCTIONS";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) functions;
+  debug_print "OP_FUNCTIONS";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) op_functions;
+  debug_print "EXENSIONS";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ String.concat "," v)) extensions;
+  debug_print "FORMATS";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) formats;
+  debug_print "MAPPINGS";
+  Hashtbl.iter
+    (fun k v -> match v with l, r -> debug_print (k ^ ": " ^ String.concat "," l ^ " <-> " ^ String.concat "," r))
+    mappings;
+
+  Hashtbl.iter
+    (fun k v ->
+      let asms = explode_mnemonics v in
+      List.iter
+        (fun asm -> Hashtbl.add assembly_clean k (List.filter (fun s -> not (String.equal s "opt_spc(())")) asm))
+        asms
+    )
+    assembly;
+
+  debug_print "ASSEMBLY_CLEAN";
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) assembly_clean;
+
+  print_endline "{";
+  print_endline "  \"instructions\": [";
+(* 
+  (* Join keys and mnemonics, then sort by mnemonic, then use the keys in that order to emit instructions *)
+  let key_mnemonic_sorted =
+    let key_mnemonic_map = Hashtbl.fold (fun k v init -> [k; List.hd v] :: init) assembly_clean [] in
+    List.sort (fun l r -> String.compare (List.hd (List.tl l)) (List.hd (List.tl r))) key_mnemonic_map
+  in
+  print_endline
+    (String.concat ",\n" (List.map (fun a -> json_of_instruction (List.hd a) (List.tl a)) key_mnemonic_sorted));
+
+  print_endline "  ],"; *)
+  (* 获取所有的助记符列表 *)
+  let mnemonics = Hashtbl.fold (fun k _ acc -> k :: acc) assembly_clean [] in
+  let sorted_mnemonics = List.sort String.compare mnemonics in
+
+  print_endline
+    (String.concat ",\n" (List.map (fun mnemonic -> json_of_instruction mnemonic) sorted_mnemonics));
+
+  print_endline "  ],";
+  print_endline "  \"registers\": ";
+  print_endline (json_of_registers ());
+  print_endline ",";
+
+  print_endline "  \"formats\": [";
+  let format_list = Hashtbl.fold (fun k v accum -> ("\"" ^ v ^ "\"") :: accum) formats [] in
+  print_endline
+    (String.concat ",\n"
+       (List.fold_right
+          (fun s accum -> if String.equal "\"\"" s then accum else s :: accum)
+          (List.sort_uniq String.compare ("\"TBD\"" :: format_list))
+          []
+       )
+    );
+  print_endline "  ],";
+
+  print_endline "  \"extensions\": [";
+  let extension_list = Hashtbl.fold (fun k v accum -> v :: accum) extensions [] in
+  print_endline (String.concat ",\n" (List.sort_uniq String.compare (List.concat extension_list)));
+  print_endline "  ],";
+
+  print_endline "  \"functions\": [";
+  print_endline
+    (String.concat ",\n"
+       (Hashtbl.fold
+          (fun name source accum ->
+            ("  {\n    \"name\": \"" ^ name ^ "\",\n" ^ "    \"source\": \"" ^ String.escaped source ^ "\"\n  }")
+            :: accum
+          )
+          functions []
+       )
+    );
+  print_endline "  ]";
+  print_endline "}" *)
