@@ -92,6 +92,7 @@ let extensions = Hashtbl.create 997
 let mappings = Hashtbl.create 997
 let registers = Hashtbl.create 997
 let instruction_type_to_format = Hashtbl.create 997
+let type_to_mnemonic_map = Hashtbl.create 997
 
 let debug_print ?(printer = prerr_endline) message = if debug_enabled then printer message else ()
 
@@ -369,6 +370,12 @@ let parse_mapcl i mc =
           List.iter (fun s -> debug_print ("L: " ^ s)) sl_left;
           List.iter (fun s -> debug_print ("R: " ^ s)) sl_right;
           Hashtbl.add mappings (string_of_id i) (sl_left, sl_right);
+          if String.ends_with ~suffix:"_mnemonic" (string_of_id i) then
+            List.iter2
+              (fun left right ->
+                Hashtbl.add type_to_mnemonic_map left right
+              )
+              sl_left sl_right;
           List.iter
             (fun mnemonic ->
               List.iter
@@ -818,7 +825,7 @@ let defs { defs; _ } =
     (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun (op, t) -> "(" ^ op ^ ", " ^ t ^ ")") v))
     operands;
   debug_print "ENCODINGS";
-  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) encodings;
+  Hashtbl.iter (fun k v -> debug_print ("ENCODINGS DEBUG KEY:" ^ k ^ " VALUE :" ^ Util.string_of_list ", " (fun x -> x) v)) encodings;
   debug_print "ASSEMBLY";
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) assembly;
   debug_print "EXECUTES";
@@ -833,8 +840,10 @@ let defs { defs; _ } =
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) formats;
   debug_print "MAPPINGS";
   Hashtbl.iter
-    (fun k v -> match v with l, r -> debug_print (k ^ ": " ^ String.concat "," l ^ " <-> " ^ String.concat "," r))
+    (fun k v -> match v with l, r -> debug_print ("MAPPINGS DEBUG KEY:" ^ k ^ " VALUE: " ^ String.concat "," l ^ " <-> " ^ String.concat "," r))
     mappings;
+  debug_print "TYPE_TO_MNEMONIC_MAP";
+  Hashtbl.iter (fun k v -> debug_print("TTMP DEBUG KEY: " ^ k ^ " value: " ^ v)) type_to_mnemonic_map;
 
   Hashtbl.iter
     (fun k v ->
@@ -868,11 +877,11 @@ let defs { defs; _ } =
   let format_list = Hashtbl.fold (fun k v accum -> ("\"" ^ v ^ "\"") :: accum) formats [] in
   print_endline
     (String.concat ",\n"
-       (List.fold_right
+        (List.fold_right
           (fun s accum -> if String.equal "\"\"" s then accum else s :: accum)
           (List.sort_uniq String.compare ("\"TBD\"" :: format_list))
           []
-       )
+        )
     );
   print_endline "  ],";
 
