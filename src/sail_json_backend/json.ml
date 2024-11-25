@@ -184,18 +184,27 @@ let parse_encdec_mpat mp pb format =
       debug_print ("MP_app " ^ string_of_id app_id);
       Hashtbl.add formats (string_of_id app_id) format;
       let operandl = List.concat (List.map string_list_of_mpat mpl) in
+      List.iter debug_print operandl;
+      debug_print "MCL_bidir (right part)";
       begin
-        List.iter debug_print operandl;
-        debug_print "MCL_bidir (right part)";
-        match pb with
-        | MPat_aux (MPat_pat p, _) ->
-            debug_print "MPat_pat ";
-            List.iter debug_print (string_list_of_mpat p);
-            Hashtbl.add encodings (string_of_id app_id) (string_list_of_mpat p)
-        | MPat_aux (MPat_when (p, e), _) ->
-            debug_print "MPat_when ";
-            List.iter debug_print (string_list_of_mpat p);
-            Hashtbl.add encodings (string_of_id app_id) (string_list_of_mpat p)
+        match List.rev mpl with
+        | mp_last :: _ ->
+          begin match mp_last with
+          | MP_aux (MP_id id, _) ->
+            begin
+              match pb with
+              | MPat_aux (MPat_pat p, _) ->
+                  debug_print "MPat_pat ";
+                  List.iter debug_print (string_list_of_mpat p);
+                  Hashtbl.add encodings (string_of_id id) (string_list_of_mpat p)
+              | MPat_aux (MPat_when (p, e), _) ->
+                  debug_print "MPat_when ";
+                  List.iter debug_print (string_list_of_mpat p);
+                  Hashtbl.add encodings (string_of_id id) (string_list_of_mpat p)
+            end
+          | _ -> ()
+          end
+        | [] -> ()
       end;
       string_of_id app_id
   | _ -> assert false
