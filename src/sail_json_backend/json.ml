@@ -352,7 +352,6 @@ let handle_fmtencdec_mapping mc =
         | MP_aux (MP_app (type_id, _), _), MP_aux (MP_app (format_id, _), _) ->
             let instruction_type = string_of_id type_id in
             let format = string_of_id format_id in
-            debug_print ("Instruction type: " ^ instruction_type ^ ", format: " ^ format);
             Hashtbl.add instruction_type_to_format instruction_type format;
         | _ -> ()
       end
@@ -365,14 +364,14 @@ let parse_mapcl i mc =
     | MCL_aux (_, (annot, _)) ->
         String.concat "-"
           (List.map
-              (fun attr -> match attr with _, "format", Some (AD_aux (AD_string s, _)) -> s | _ -> "")
-              annot.attrs
+            (fun attr -> match attr with _, "format", Some (AD_aux (AD_string s, _)) -> s | _ -> "")
+            annot.attrs
           )
   in
   match string_of_id i with
   | "fmtencdec" ->
-    debug_print (string_of_id i);
-    handle_fmtencdec_mapping mc;
+      debug_print (string_of_id i);
+      handle_fmtencdec_mapping mc;
   | "encdec" | "encdec_compressed" ->
       debug_print (string_of_id i);
       parse_encdec i mc format;
@@ -754,7 +753,6 @@ let json_of_format k =
       )
   in
   "\"" ^ format ^ "\""
-  
 
 let json_of_extensions k = match Hashtbl.find_opt extensions k with None -> "" | Some l -> String.concat "," l
 
@@ -855,7 +853,7 @@ let defs { defs; _ } =
     (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun (op, t) -> "(" ^ op ^ ", " ^ t ^ ")") v))
     operands;
   debug_print "ENCODINGS";
-  Hashtbl.iter (fun k v -> debug_print ("ENCODINGS DEBUG KEY:" ^ k ^ " VALUE :" ^ Util.string_of_list ", " (fun x -> x) v)) encodings;
+  Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) encodings;
   debug_print "ASSEMBLY";
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ Util.string_of_list ", " (fun x -> x) v)) assembly;
   debug_print "EXECUTES";
@@ -870,7 +868,7 @@ let defs { defs; _ } =
   Hashtbl.iter (fun k v -> debug_print (k ^ ":" ^ v)) formats;
   debug_print "MAPPINGS";
   Hashtbl.iter
-    (fun k v -> match v with l, r -> debug_print ("MAPPINGS DEBUG KEY:" ^ k ^ " VALUE: " ^ String.concat "," l ^ " <-> " ^ String.concat "," r))
+    (fun k v -> match v with l, r -> debug_print (k ^ ":" ^ String.concat "," l ^ " <-> " ^ String.concat "," r))
     mappings;
   debug_print "TYPE_TO_MNEMONIC_MAP";
   Hashtbl.iter (fun k v -> debug_print("TTMP DEBUG KEY: " ^ k ^ " value: " ^ v)) type_to_mnemonic_map;
@@ -899,8 +897,6 @@ let defs { defs; _ } =
     (String.concat ",\n" (List.map (fun a ->
         let key = List.hd a in
         let value = List.tl a in
-        debug_print ("SORTED Key: " ^ key);
-        debug_print ("Value: " ^ String.concat ", " value);
         json_of_instruction key value
     ) key_mnemonic_sorted));  
 
@@ -929,13 +925,13 @@ let defs { defs; _ } =
   print_endline "  \"functions\": [";
   print_endline
     (String.concat ",\n"
-       (Hashtbl.fold
-          (fun name source accum ->
-            ("  {\n    \"name\": \"" ^ name ^ "\",\n" ^ "    \"source\": \"" ^ String.escaped source ^ "\"\n  }")
-            :: accum
-          )
-          functions []
-       )
+      (Hashtbl.fold
+        (fun name source accum ->
+          ("  {\n    \"name\": \"" ^ name ^ "\",\n" ^ "    \"source\": \"" ^ String.escaped source ^ "\"\n  }")
+          :: accum
+        )
+        functions []
+      )
     );
   print_endline "  ]";
   print_endline "}"
