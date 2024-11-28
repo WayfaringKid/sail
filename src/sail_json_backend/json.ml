@@ -346,14 +346,14 @@ let parse_mapcl i mc =
     | MCL_aux (_, (annot, _)) ->
         String.concat "-"
           (List.map
-              (fun attr -> match attr with _, "format", Some (AD_aux (AD_string s, _)) -> s | _ -> "")
-              annot.attrs
+            (fun attr -> match attr with _, "format", Some (AD_aux (AD_string s, _)) -> s | _ -> "")
+            annot.attrs
           )
   in
   match string_of_id i with
   | "fmtencdec" ->
-    debug_print (string_of_id i);
-    handle_fmtencdec_mapping mc;
+      debug_print (string_of_id i);
+      handle_fmtencdec_mapping mc;
   | "encdec" | "encdec_compressed" ->
       debug_print (string_of_id i);
       parse_encdec i mc format;
@@ -717,7 +717,6 @@ let json_of_format k =
       )
   in
   "\"" ^ format ^ "\""
-  
 
 let json_of_extensions k = match Hashtbl.find_opt extensions k with None -> "" | Some l -> String.concat "," l
 
