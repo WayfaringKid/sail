@@ -191,17 +191,26 @@ let parse_encdec_mpat mp pb format =
         | mp_last :: _ ->
           begin match mp_last with
           | MP_aux (MP_id id, _) ->
-            begin
-              match pb with
-              | MPat_aux (MPat_pat p, _) ->
-                  debug_print "MPat_pat ";
-                  List.iter debug_print (string_list_of_mpat p);
-                  Hashtbl.add encodings (string_of_id id) (string_list_of_mpat p)
-              | MPat_aux (MPat_when (p, e), _) ->
-                  debug_print "MPat_when ";
-                  List.iter debug_print (string_list_of_mpat p);
-                  Hashtbl.add encodings (string_of_id id) (string_list_of_mpat p)
-            end
+              let key_string =
+                if Hashtbl.mem type_to_mnemonic_map (string_of_id app_id) then
+                  Hashtbl.find type_to_mnemonic_map (string_of_id app_id)
+                else if Hashtbl.mem type_to_mnemonic_map (string_of_id id) then
+                  Hashtbl.find type_to_mnemonic_map (string_of_id id)
+                else
+                  (string_of_id app_id) ^ "-" ^ (string_of_id id)
+              in
+              begin
+                match pb with
+                | MPat_aux (MPat_pat p, _) ->
+                    debug_print "MPat_pat ";
+                    List.iter debug_print (string_list_of_mpat p);
+                    Hashtbl.add encodings key_string (string_list_of_mpat p)
+                | MPat_aux (MPat_when (p, _), _) ->
+                    debug_print "MPat_when ";
+                    List.iter debug_print (string_list_of_mpat p);
+                    Hashtbl.add encodings key_string (string_list_of_mpat p)
+                | _ -> ()
+              end
           | _ -> ()
           end
         | [] -> ()
@@ -703,8 +712,8 @@ let rec string_of_sizeof_field k f =
 
 let json_of_field k f = "{ \"field\": \"" ^ f ^ "\", \"size\": " ^ string_of_sizeof_field k f ^ " }"
 
-let json_of_fields k =
-  match Hashtbl.find_opt encodings k with
+let json_of_fields k mnemonic =
+  match Hashtbl.find_opt encodings mnemonic with
   | None -> ""
   | Some fields -> String.concat ", " (List.map (fun f -> json_of_field k f) fields)
 
@@ -743,7 +752,7 @@ let json_of_instruction k v =
   ^ ",\n" ^ "  \"name\": "
   ^ json_of_name k (List.hd v)
   ^ ",\n" ^ "  \"operands\": [ " ^ json_of_operands k ^ " ],\n" ^ "  \"syntax\": " ^ "\"" ^ json_of_syntax k ^ "\",\n"
-  ^ "  \"format\": " ^ json_of_format k ^ ",\n" ^ "  \"fields\": [ " ^ json_of_fields k ^ " ],\n"
+  ^ "  \"format\": " ^ json_of_format k ^ ",\n" ^ "  \"fields\": [ " ^ json_of_fields k (List.hd v) ^ " ],\n"
   ^ "  \"extensions\": [ " ^ json_of_extensions k ^ " ],\n" ^ "  \"function\": " ^ json_of_function k ^ ",\n"
   ^ "  \"description\": " ^ json_of_description k ^ "\n" ^ "}"
 
@@ -875,7 +884,13 @@ let defs { defs; _ } =
     List.sort (fun l r -> String.compare (List.hd (List.tl l)) (List.hd (List.tl r))) key_mnemonic_map
   in
   print_endline
-    (String.concat ",\n" (List.map (fun a -> json_of_instruction (List.hd a) (List.tl a)) key_mnemonic_sorted));
+    (String.concat ",\n" (List.map (fun a ->
+        let key = List.hd a in
+        let value = List.tl a in
+        debug_print ("SORTED Key: " ^ key);
+        debug_print ("Value: " ^ String.concat ", " value);
+        json_of_instruction key value
+    ) key_mnemonic_sorted));  
 
   print_endline "  ],";
   print_endline "  \"registers\": ";
