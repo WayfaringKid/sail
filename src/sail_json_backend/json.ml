@@ -414,6 +414,14 @@ let parse_type_union i ucl =
   match ucl with
   | Tu_aux (Tu_ty_id (c, d), annot) ->
       debug_print ~printer:prerr_string ("Tu_ty_id " ^ string_of_id d ^ "(");
+      List.iter
+        (fun attr ->
+          match attr with _, "name", Some (AD_aux (AD_string s, _)) -> Hashtbl.add names (string_of_id d) s | _ -> ()
+        )
+        annot.attrs;
+      begin
+        match annot.doc_comment with None -> () | Some s -> Hashtbl.add descriptions (string_of_id d) s
+      end;
       begin
         match c with
         | Typ_aux (Typ_tuple x, _) ->
@@ -425,17 +433,7 @@ let parse_type_union i ucl =
               )
               x;
             let l = List.map string_of_typ x in
-            Hashtbl.add sigs (string_of_id d) l;
-            List.iter
-              (fun attr ->
-                match attr with
-                | _, "name", Some (AD_aux (AD_string s, _)) -> Hashtbl.add names (string_of_id d) s
-                | _ -> ()
-              )
-              annot.attrs;
-            begin
-              match annot.doc_comment with None -> () | Some s -> Hashtbl.add descriptions (string_of_id d) s
-            end
+            Hashtbl.add sigs (string_of_id d) l
         | Typ_aux (Typ_id i, _) -> Hashtbl.add sigs (string_of_id d) [string_of_id i]
         | Typ_aux (Typ_app (i, _), _) ->
             debug_print (string_of_typ c);
@@ -535,6 +533,10 @@ let identity_funcs =
     "freg_or_reg_name";
     "vreg_name";
     "maybe_vmask";
+    "sew_flag";
+    "maybe_lmul_flag";
+    "maybe_ta_flag";
+    "maybe_ma_flag";
   ]
 
 let defunction f n =
@@ -662,6 +664,16 @@ let json_of_syntax k =
         if String.equal s "sep" then ","
         else if String.equal s "\"(\"" then "("
         else if String.equal s "\")\"" then ")"
+        else if String.starts_with ~prefix:"maybe_" s then "[," ^ remove_identity_funcs s ^ "]"
+        else if String.contains s ',' then (
+          let elements = Str.split (Str.regexp ",") (remove_identity_funcs s) in
+          let filtered_elements =
+            match Hashtbl.find_opt inputs k with
+            | None -> []
+            | Some inputl -> List.filter (fun element -> List.mem element inputl) elements
+          in
+          String.concat "," filtered_elements
+        )
         else remove_identity_funcs s
       )
       (List.tl (Hashtbl.find assembly_clean k))
@@ -723,8 +735,8 @@ let json_of_function k =
 
 let json_of_name k mnemonic =
   let name =
-    match Hashtbl.find_opt names k with
-    | None -> begin match Hashtbl.find_opt names mnemonic with None -> "TBD" | Some s -> String.escaped s end
+    match Hashtbl.find_opt names mnemonic with
+    | None -> begin match Hashtbl.find_opt names k with None -> "TBD" | Some s -> String.escaped s end
     | Some s -> String.escaped s
   in
   "\"" ^ name ^ "\""
